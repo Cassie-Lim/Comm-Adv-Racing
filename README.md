@@ -1,4 +1,4 @@
-# Multi-Car Racing Environment Solved
+# Learning to Communicate in Multi-Agent Semi-Adversarial Environments
 
 <p>
     <img src="GIF/FinishTrack.gif" width="225" height="180"/>
@@ -10,23 +10,23 @@
 </p>
 
 ## Overview
-This project is based on the concepts presented in the paper [Emergent Coordination Through Competition](https://openreview.net/pdf?id=BkG8sjR5Km). The paper discusses how competition among agents can lead to emergent coordination. Here, we have implemented a population-based algorithm to address the multi-car racing challenge. While the paper utilizes the [SVG0](https://arxiv.org/pdf/1510.09142) algorithm, this implementation leverages the [DDPG](https://arxiv.org/pdf/1509.02971) algorithm to optimize agent performance.
+This is a project repo for fa24 cs8803-DRL in Gatech. 
+This project is based on the concepts presented in the paper [Emergent Coordination Through Competition](https://openreview.net/pdf?id=BkG8sjR5Km) and use this [repo](https://github.com/DomenicoMeconi/MultiCarRacing-ReinforcementLearning.git) as a code base.
 
 ## Installation
 
 1. **Install And Set Up The Environment:**
-    Please follow the steps in this [multi_car_racing git](https://github.com/igilitschenski/multi_car_racing.git)
+    ```bash
+    conda create -n car python=3.8
+    ```
 
-2. **Ensure Python Version:**
-    Make sure you are using Python version greater than 3.11.
-
-3. **Install Dependencies:**
+2. **Install Dependencies:**
     In case there are issues with the environment installation, especially with `Box-2D`, try to install:
     ```bash
     pip install shapely
     ```
 
-4. **Install Required Packages:**
+3. **Install Required Packages:**
     ```bash
     pip install -r requirements.txt
     ```
@@ -54,10 +54,4 @@ After successfully installing the required packages, you can run the main script
     ```bash
     python .\main -e -c
     ```
-## Contact
 
-For any issues or questions, feel free to contact me at meconidomenico@gmail.com
-
-Enjoy racing! 🚗💨
-
----
