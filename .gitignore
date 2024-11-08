@@ -1,0 +1,7 @@
+checkpoint/
+__pycache__/
+*.pyc
+.vscode/
+tmp*
+logging/
+*.pth

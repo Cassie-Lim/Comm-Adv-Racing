@@ -12,8 +12,8 @@ from networks import PolicyNetwork, CriticNetwork
 from utils import *
 import os
 from pyglet.window import key
-
-
+from torch.utils.tensorboard import SummaryWriter
+import imageio
 ACTION_DIM = 3  
 NUM_AGENTS = 4
 
@@ -34,7 +34,8 @@ LEARNING_RATE_POLICY = [0.000002 + i * 0.000001 for i in range(POPULATION_SIZE)]
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(device)
 preview = False
-
+# TensorBoard
+writer = SummaryWriter("logging/training")
 def key_press(k, mod):
     """If the space bar is pressed, the scene will be rendered."""
     if k == key.SPACE:
@@ -66,7 +67,7 @@ class Agent:
 
         self.target_policy.load_state_dict(self.policy_network.state_dict())
 
-def evaluate_agents(agents, environment, population, critic_manager = None, eval=False, update_networks=False):
+def evaluate_agents(agents, environment, population, critic_manager=None, eval=False, update_networks=False, generation=0):
     """ 
     Evaluate the agents and update their networks in the environment.
     
@@ -85,10 +86,15 @@ def evaluate_agents(agents, environment, population, critic_manager = None, eval
     print(f"Evaluating agents {indexes}...")
 
     total_reward = np.zeros(len(agents))
+    environment.step(None)
     states = environment.reset()
     states = preprocess(states)
     done = False
     pbar = tqdm(total=1000)
+
+    # GIF Recording: Initialize a list of lists for frames, one per agent
+    if eval:
+        agent_frames = [[] for _ in range(len(agents))]
 
     while not done:
         states_tensor = torch.tensor(states, dtype=torch.float32).permute(0, 3, 1, 2).to(device)
@@ -102,10 +108,9 @@ def evaluate_agents(agents, environment, population, critic_manager = None, eval
 
             # Clip actions to the environment's action space
             for act in action:
-                act[0] = np.clip(act[0] ,-1,1)
-                act[1] = np.clip(act[1] ,0,1)
-                act[2] = np.clip(act[2],0,1)
-            
+                act[0] = np.clip(act[0], -1, 1)
+                act[1] = np.clip(act[1], 0, 1)
+                act[2] = np.clip(act[2], 0, 1)
             actions.append(action)
         
         # Step in the environment
@@ -128,16 +133,36 @@ def evaluate_agents(agents, environment, population, critic_manager = None, eval
                     update(agent, population, GAMMA, BATCH_SIZE, critic_manager.critic_network, critic_manager.target_critic)
                     torch.cuda.empty_cache()
 
+        if eval:
+            # Render frames and save separately for each agent
+            rendered_frames = environment.render(mode="rgb_array")
+            for i, frame in enumerate(rendered_frames):
+                agent_frames[i].append(frame)
+
         pbar.update(1)
         total_reward += rewards
         states = next_states
 
-        if eval or preview:
-            environment.render()
-
     pbar.close()
-    print(f"Total reward: {total_reward[0]:.2f} || {total_reward[1]:.2f} || {total_reward[2]:.2f} || {total_reward[3]:.2f}")
+    avg_reward = np.mean(total_reward)
+    
+    # Log rewards to TensorBoard
+    if eval:
+        writer.add_scalar("Eval Reward", avg_reward, generation)
+        
+        # Save GIFs for each agent
+        for i, frames in enumerate(agent_frames):
+            gif_path = f"logging/eval_gif_agent_{i}_generation_{generation}.gif"
+            with imageio.get_writer(gif_path, mode='I') as writer_gif:
+                for frame in frames:
+                    writer_gif.append_data(frame)
+            print(f"Saved evaluation GIF for agent {i} to {gif_path}")
+        
+    else:
+        writer.add_scalar("Training Reward", avg_reward, generation)
+    
     return total_reward
+
 
 def save_checkpoint(population, critic_manager):
     """ 
@@ -205,7 +230,8 @@ def pbt_training(population, environment, generations, critic_manager, checkpoin
                                       environment, 
                                       population,
                                       critic_manager=critic_manager, 
-                                      update_networks=update_networks)
+                                      update_networks=update_networks,
+                                      generation=generation)
 
             # Remove agents from the population copy
             population_copy = [agent for agent in population_copy if agent not in agents]
