@@ -5,3 +5,6 @@ __pycache__/
 tmp*
 logging/
 *.pth
+env
+runs
+models
