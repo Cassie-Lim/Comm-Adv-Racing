@@ -5,7 +5,7 @@ The intention was for users to have a (relatively clean) ~200 line file to refer
 
 Author: Jet (https://github.com/jjshoots)
 """
-
+import os
 import numpy as np
 import torch
 import torch.nn as nn
@@ -19,8 +19,9 @@ from pettingzoo.butterfly import pistonball_v6
 from torch.utils.tensorboard import SummaryWriter
 
 NUM_PISTONS = 20
-COMM_SIZE = NUM_PISTONS
+COMM_SIZE = NUM_PISTONS + 512
 COMM_ACTION = False
+COMM_STATES = False
 LR = 1e-4
 
 
@@ -58,6 +59,12 @@ class Agent(nn.Module):
             self._layer_init(nn.Linear(64, 1), std=0.01))
 
         self.prev_action = None
+        # Create a weight matrix based on distances
+        weights = torch.zeros((NUM_PISTONS, NUM_PISTONS)).to(device)
+        for i in range(NUM_PISTONS):
+            for j in range(NUM_PISTONS):
+                weights[i, j] = 1 / (abs(i - j) + 1)
+        self.weights = weights / weights.sum(dim=1, keepdim=True)
 
     def _layer_init(self, layer, std=np.sqrt(2), bias_const=0.0):
         torch.nn.init.orthogonal_(layer.weight, std)
@@ -74,9 +81,11 @@ class Agent(nn.Module):
     def get_action_and_value(self, x, action=None, comm=None):
         B, _, _, _ = x.shape
         if comm is None:
-            comm = torch.zeros((B, NUM_PISTONS)).to(device)
+            comm = torch.zeros((B, COMM_SIZE)).to(device)
         hidden = self.network(x / 255.0)
         actor_input = torch.concatenate([hidden, comm], dim=1)
+        # assert comm is not None
+        # actor_input = comm # here comm is the agrregated info already
         logits = self.actor(actor_input)
         probs = Categorical(logits=logits)
         if action is None:
@@ -85,7 +94,23 @@ class Agent(nn.Module):
         return action, probs.log_prob(action), probs.entropy(), self.critic(actor_input)
 
     def get_comm(self, x):
-        return self.prev_action
+        if not COMM_STATES:
+            if self.prev_action is None:
+                return None
+            return torch.tile(self.prev_action, (B, 1))
+        with torch.no_grad():
+            hidden = self.network(x / 255.0)
+        if self.prev_action is None:
+            prev_action = torch.zeros((B, NUM_PISTONS)).to(device)
+        else:
+            prev_action = torch.tile(self.prev_action, (B, 1)).to(device)
+        # return torch.concatenate([hidden, prev_action], dim=1)
+        weighted_hidden = torch.concatenate([self.weights @ hidden, prev_action], dim=1)
+        return weighted_hidden
+        # if self.prev_action is None:
+        #     return None
+        # else:
+        #     return self.weights @ self.prev_action.float()
 
     def reset_comm(self):
         self.prev_action = None
@@ -132,13 +157,21 @@ if __name__ == "__main__":
     stack_size = 4
     frame_size = (64, 64)
     max_cycles = 125
-    total_episodes = 5000
+    total_episodes = 500
+    # total_episodes = 5000
 
     parser = argparse.ArgumentParser()
     parser.add_argument('-ca', '--communicate_actions', action='store_true')
+    parser.add_argument('-cs', '--communicate_states', action='store_true')
     parser.add_argument('-r', '--render', action='store_true')
     args = parser.parse_args()
     COMM_ACTION = args.communicate_actions
+    COMM_STATES = args.communicate_states
+    COMM_SIZE = 0
+    if COMM_ACTION:
+        COMM_SIZE = NUM_PISTONS
+    if COMM_STATES:
+        COMM_SIZE += 512
     render = args.render
 
     writer = SummaryWriter()
@@ -189,9 +222,10 @@ if __name__ == "__main__":
                 # get action from the agent
                 comm = agent.get_comm(obs)
                 if comm is not None and COMM_ACTION:
-                    comm_batch = torch.tile(comm, (B, 1)).to(device)
+                    comm_batch = comm.to(device)
+                    # comm_batch = torch.tile(comm, (B, 1)).to(device)
                 else:
-                    comm_batch = torch.zeros((B, NUM_PISTONS)).to(device)
+                    comm_batch = torch.zeros((B, COMM_SIZE)).to(device)
 
                 actions, logprobs, _, values = agent.get_action_and_value(
                     obs, comm=comm_batch)
@@ -323,12 +357,12 @@ if __name__ == "__main__":
                           np.mean(total_episodic_return), episode)
         writer.add_scalar("Episode/Value_Loss", v_loss.item(), episode)
         writer.add_scalar("Episode/Policy_Loss", pg_loss.item(), episode)
-
+    os.makedirs("models", exist_ok=True)
     torch.save({
         'epoch': total_episodes,
         'agent_state_dict': agent.state_dict(),
         'optimizer_state_dict': optimizer.state_dict(),
-    }, "models/{}_ca_{}".format(datetime.datetime.now(), COMM_ACTION))
+    }, "models/{}_ca_{}_{}.pt".format(datetime.datetime.now(), COMM_ACTION, COMM_STATES))
 
     """ RENDER THE POLICY """
     env = pistonball_v6.parallel_env(render_mode="human", continuous=False)
