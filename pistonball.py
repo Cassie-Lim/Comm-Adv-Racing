@@ -42,16 +42,22 @@ class Agent(nn.Module):
             self._layer_init(nn.Linear(128 * 8 * 8, 512)),
             nn.ReLU(),
         )
+        self.comm = nn.Sequential(
+            self._layer_init(nn.Linear(512 + 1, 128)),
+            nn.ReLU(),
+            self._layer_init(nn.Linear(128, 1)),
+        )
+
         # Want to give actor/critic more repr power (maybe encoder/decoder)
         self.actor = nn.Sequential(
-            self._layer_init(nn.Linear(512 + COMM_SIZE, 128), std=0.01),
+            self._layer_init(nn.Linear(512 + COMM_SIZE + 1, 128), std=0.01),
             nn.ReLU(),
             self._layer_init(nn.Linear(128, 64), std=0.01),
             nn.ReLU(),
             self._layer_init(nn.Linear(64, num_actions), std=0.01))
 
         self.critic = nn.Sequential(
-            self._layer_init(nn.Linear(512 + COMM_SIZE, 128)),
+            self._layer_init(nn.Linear(512 + COMM_SIZE + 1, 128)),
             nn.ReLU(),
             self._layer_init(nn.Linear(128, 64)),
             nn.ReLU(),
@@ -71,12 +77,12 @@ class Agent(nn.Module):
         critic_input = torch.concatenate([hidden, comm], dim=1)
         return self.critic(critic_input)
 
-    def get_action_and_value(self, x, action=None, comm=None):
+    def get_action_and_value(self, x, id, action=None, comm=None):
         B, _, _, _ = x.shape
         if comm is None:
             comm = torch.zeros((B, NUM_PISTONS)).to(device)
         hidden = self.network(x / 255.0)
-        actor_input = torch.concatenate([hidden, comm], dim=1)
+        actor_input = torch.concatenate([hidden, comm, id], dim=1)
         logits = self.actor(actor_input)
         probs = Categorical(logits=logits)
         if action is None:
@@ -84,8 +90,11 @@ class Agent(nn.Module):
         self.prev_action = action
         return action, probs.log_prob(action), probs.entropy(), self.critic(actor_input)
 
-    def get_comm(self, x):
-        return self.prev_action
+    def get_comm(self, x, id):
+        hidden = self.network(x / 255.0)
+        comm_input = torch.concatenate([hidden, id], dim=1)
+        comm = self.comm(comm_input)
+        return comm
 
     def reset_comm(self):
         self.prev_action = None
@@ -117,7 +126,6 @@ def unbatchify(x, env):
     """Converts np array to PZ style arguments."""
     x = x.cpu().numpy()
     x = {a: x[i] for i, a in enumerate(env.possible_agents)}
-
     return x
 
 
@@ -132,7 +140,7 @@ if __name__ == "__main__":
     stack_size = 4
     frame_size = (64, 64)
     max_cycles = 125
-    total_episodes = 5000
+    total_episodes = 10
 
     parser = argparse.ArgumentParser()
     parser.add_argument('-ca', '--communicate_actions', action='store_true')
@@ -145,7 +153,12 @@ if __name__ == "__main__":
 
     """ ENV SETUP """
     env = pistonball_v6.parallel_env(
-        render_mode="rgb_array", continuous=False, max_cycles=max_cycles
+        render_mode="rgb_array", time_penalty=-0.5,
+        continuous=False,
+        max_cycles=max_cycles,
+        ball_mass=5.0,
+        ball_friction=0.5,
+        ball_elasticity=0.75
     )
     env = color_reduction_v0(env)
     env = resize_v1(env, frame_size[0], frame_size[1])
@@ -165,6 +178,7 @@ if __name__ == "__main__":
         (max_cycles, num_agents, stack_size, *frame_size)).to(device)
     rb_actions = torch.zeros((max_cycles, num_agents)).to(device)
     rb_comm = torch.zeros((max_cycles, num_agents, COMM_SIZE)).to(device)
+    rb_ids = torch.zeros((max_cycles, num_agents, 1)).to(device)
     rb_logprobs = torch.zeros((max_cycles, num_agents)).to(device)
     rb_rewards = torch.zeros((max_cycles, num_agents)).to(device)
     rb_terms = torch.zeros((max_cycles, num_agents)).to(device)
@@ -187,14 +201,17 @@ if __name__ == "__main__":
                 B, _, _, _ = obs.shape
                 # Communication is initially communication of state of all pistons
                 # get action from the agent
-                comm = agent.get_comm(obs)
+                ids = torch.arange(NUM_PISTONS).unsqueeze(-1).to(device)
+                comm = agent.get_comm(obs, ids)
                 if comm is not None and COMM_ACTION:
-                    comm_batch = torch.tile(comm, (B, 1)).to(device)
+                    # Each Agent gets a copy of the communications
+                    comm_batch = torch.tile(
+                        comm.view((1, COMM_SIZE)), (B, 1)).to(device)
                 else:
                     comm_batch = torch.zeros((B, NUM_PISTONS)).to(device)
 
                 actions, logprobs, _, values = agent.get_action_and_value(
-                    obs, comm=comm_batch)
+                    obs, ids, comm=comm_batch)
 
                 # execute the environment and log data
                 next_obs, rewards, terms, truncs, infos = env.step(
@@ -203,6 +220,7 @@ if __name__ == "__main__":
 
                 # add to episode storage
                 rb_obs[step] = obs
+                rb_ids[step] = ids
                 rb_rewards[step] = batchify(rewards, device)
                 rb_terms[step] = batchify(terms, device)
                 rb_comm[step] = comm_batch
@@ -232,6 +250,7 @@ if __name__ == "__main__":
 
         # convert our episodes to batch of individual transitions
         b_obs = torch.flatten(rb_obs[:end_step], start_dim=0, end_dim=1)
+        b_ids = torch.flatten(rb_ids[:end_step], start_dim=0, end_dim=1)
         b_logprobs = torch.flatten(
             rb_logprobs[:end_step], start_dim=0, end_dim=1)
         b_actions = torch.flatten(
@@ -256,6 +275,7 @@ if __name__ == "__main__":
 
                 _, newlogprob, entropy, value = agent.get_action_and_value(
                     b_obs[batch_index],
+                    b_ids[batch_index],
                     b_actions.long()[batch_index],
                     comm=b_comm[batch_index]
                 )
@@ -347,8 +367,17 @@ if __name__ == "__main__":
                 terms = [False]
                 truncs = [False]
                 while not any(terms) and not any(truncs):
+                    ids = torch.arange(NUM_PISTONS).unsqueeze(-1).to(device)
+                    comm = agent.get_comm(obs, ids)
+                    if comm is not None and COMM_ACTION:
+                        # Each Agent gets a copy of the communications
+                        comm_batch = torch.tile(
+                            comm.view((1, COMM_SIZE)), (B, 1)).to(device)
+                    else:
+                        comm_batch = torch.zeros((B, NUM_PISTONS)).to(device)
+
                     actions, logprobs, _, values = agent.get_action_and_value(
-                        obs)
+                        obs, ids, comm=comm_batch)
                     obs, rewards, terms, truncs, infos = env.step(
                         unbatchify(actions, env))
                     obs = batchify_obs(obs, device)
