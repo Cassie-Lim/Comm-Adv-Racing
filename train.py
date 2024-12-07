@@ -35,7 +35,7 @@ if __name__ == "__main__":
     stack_size = 4
     frame_size = (64, 64)
     max_cycles = 125
-    total_episodes = 5
+    total_episodes = 500
 
     parser = argparse.ArgumentParser()
     parser.add_argument('-ca', '--communicate_actions', action='store_true')
