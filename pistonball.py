@@ -23,6 +23,7 @@ COMM_SIZE = NUM_PISTONS + 512
 COMM_ACTION = False
 COMM_STATES = False
 LR = 1e-4
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 class Agent(nn.Module):
@@ -94,6 +95,7 @@ class Agent(nn.Module):
         return action, probs.log_prob(action), probs.entropy(), self.critic(actor_input)
 
     def get_comm(self, x):
+        B = x.shape[0]
         if not COMM_STATES:
             if self.prev_action is None:
                 return None

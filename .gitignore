@@ -8,3 +8,4 @@ logging/
 env
 runs
 models
+*.gif
