@@ -11,123 +11,18 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from supersuit import color_reduction_v0, frame_stack_v1, resize_v1
-from torch.distributions.categorical import Categorical
 import argparse
 import datetime
 
 from pettingzoo.butterfly import pistonball_v6
 from torch.utils.tensorboard import SummaryWriter
-
+from utils import batchify_obs, batchify, render_and_save_gif, unbatchify
+from agent import Agent
 NUM_PISTONS = 20
-COMM_SIZE = NUM_PISTONS
+COMM_SIZE = 512 + 1
+COMM_SIZE_COMPRESSED = 32
 COMM_ACTION = False
 LR = 1e-4
-
-
-class Agent(nn.Module):
-    def __init__(self, num_actions):
-        super().__init__()
-
-        self.network = nn.Sequential(
-            self._layer_init(nn.Conv2d(4, 32, 3, padding=1)),
-            nn.MaxPool2d(2),
-            nn.ReLU(),
-            self._layer_init(nn.Conv2d(32, 64, 3, padding=1)),
-            nn.MaxPool2d(2),
-            nn.ReLU(),
-            self._layer_init(nn.Conv2d(64, 128, 3, padding=1)),
-            nn.MaxPool2d(2),
-            nn.ReLU(),
-            nn.Flatten(),
-            self._layer_init(nn.Linear(128 * 8 * 8, 512)),
-            nn.ReLU(),
-        )
-        self.comm = nn.Sequential(
-            self._layer_init(nn.Linear(512 + 1, 128)),
-            nn.ReLU(),
-            self._layer_init(nn.Linear(128, 1)),
-        )
-
-        # Want to give actor/critic more repr power (maybe encoder/decoder)
-        self.actor = nn.Sequential(
-            self._layer_init(nn.Linear(512 + COMM_SIZE + 1, 128), std=0.01),
-            nn.ReLU(),
-            self._layer_init(nn.Linear(128, 64), std=0.01),
-            nn.ReLU(),
-            self._layer_init(nn.Linear(64, num_actions), std=0.01))
-
-        self.critic = nn.Sequential(
-            self._layer_init(nn.Linear(512 + COMM_SIZE + 1, 128)),
-            nn.ReLU(),
-            self._layer_init(nn.Linear(128, 64)),
-            nn.ReLU(),
-            self._layer_init(nn.Linear(64, 1), std=0.01))
-
-        self.prev_action = None
-
-    def _layer_init(self, layer, std=np.sqrt(2), bias_const=0.0):
-        torch.nn.init.orthogonal_(layer.weight, std)
-        torch.nn.init.constant_(layer.bias, bias_const)
-        return layer
-
-    def get_value(self, x, comm=None):
-        if comm is None:
-            comm = torch.zeros((NUM_PISTONS, NUM_PISTONS)).to(device)
-        hidden = self.network(x / 255.0)
-        critic_input = torch.concatenate([hidden, comm], dim=1)
-        return self.critic(critic_input)
-
-    def get_action_and_value(self, x, id, action=None, comm=None):
-        B, _, _, _ = x.shape
-        if comm is None:
-            comm = torch.zeros((B, NUM_PISTONS)).to(device)
-        hidden = self.network(x / 255.0)
-        actor_input = torch.concatenate([hidden, comm, id], dim=1)
-        logits = self.actor(actor_input)
-        probs = Categorical(logits=logits)
-        if action is None:
-            action = probs.sample()
-        self.prev_action = action
-        return action, probs.log_prob(action), probs.entropy(), self.critic(actor_input)
-
-    def get_comm(self, x, id):
-        hidden = self.network(x / 255.0)
-        comm_input = torch.concatenate([hidden, id], dim=1)
-        comm = self.comm(comm_input)
-        return comm
-
-    def reset_comm(self):
-        self.prev_action = None
-
-
-def batchify_obs(obs, device):
-    """Converts PZ style observations to batch of torch arrays."""
-    # convert to list of np arrays
-    obs = np.stack([obs[a] for a in obs], axis=0)
-    # transpose to be (batch, channel, height, width)
-    obs = obs.transpose(0, -1, 1, 2)
-    # convert to torch
-    obs = torch.tensor(obs).to(device)
-
-    return obs
-
-
-def batchify(x, device):
-    """Converts PZ style returns to batch of torch arrays."""
-    # convert to list of np arrays
-    x = np.stack([x[a] for a in x], axis=0)
-    # convert to torch
-    x = torch.tensor(x).to(device)
-
-    return x
-
-
-def unbatchify(x, env):
-    """Converts np array to PZ style arguments."""
-    x = x.cpu().numpy()
-    x = {a: x[i] for i, a in enumerate(env.possible_agents)}
-    return x
-
 
 if __name__ == "__main__":
     """ALGO PARAMS"""
@@ -140,7 +35,7 @@ if __name__ == "__main__":
     stack_size = 4
     frame_size = (64, 64)
     max_cycles = 125
-    total_episodes = 10
+    total_episodes = 5
 
     parser = argparse.ArgumentParser()
     parser.add_argument('-ca', '--communicate_actions', action='store_true')
@@ -168,7 +63,8 @@ if __name__ == "__main__":
     observation_size = env.observation_space(env.possible_agents[0]).shape
 
     """ LEARNER SETUP """
-    agent = Agent(num_actions=num_actions).to(device)
+    agent = Agent(num_actions=num_actions,
+                  comm_size=COMM_SIZE, num_pistons=NUM_PISTONS, device=device, comm_size_compressed=COMM_SIZE_COMPRESSED).to(device)
     optimizer = optim.Adam(agent.parameters(), lr=LR, eps=1e-5)
 
     """ ALGO LOGIC: EPISODE STORAGE"""
@@ -177,7 +73,7 @@ if __name__ == "__main__":
     rb_obs = torch.zeros(
         (max_cycles, num_agents, stack_size, *frame_size)).to(device)
     rb_actions = torch.zeros((max_cycles, num_agents)).to(device)
-    rb_comm = torch.zeros((max_cycles, num_agents, COMM_SIZE)).to(device)
+    rb_comm = torch.zeros((max_cycles, num_agents, COMM_SIZE_COMPRESSED)).to(device)
     rb_ids = torch.zeros((max_cycles, num_agents, 1)).to(device)
     rb_logprobs = torch.zeros((max_cycles, num_agents)).to(device)
     rb_rewards = torch.zeros((max_cycles, num_agents)).to(device)
@@ -205,10 +101,11 @@ if __name__ == "__main__":
                 comm = agent.get_comm(obs, ids)
                 if comm is not None and COMM_ACTION:
                     # Each Agent gets a copy of the communications
-                    comm_batch = torch.tile(
-                        comm.view((1, COMM_SIZE)), (B, 1)).to(device)
+                    comm_batch = comm.to(device)
+                    # comm_batch = torch.tile(
+                    #     comm.view((1, COMM_SIZE)), (B, 1)).to(device)
                 else:
-                    comm_batch = torch.zeros((B, NUM_PISTONS)).to(device)
+                    comm_batch = torch.zeros((B, COMM_SIZE_COMPRESSED)).to(device)
 
                 actions, logprobs, _, values = agent.get_action_and_value(
                     obs, ids, comm=comm_batch)
@@ -348,10 +245,11 @@ if __name__ == "__main__":
         'epoch': total_episodes,
         'agent_state_dict': agent.state_dict(),
         'optimizer_state_dict': optimizer.state_dict(),
-    }, "models/{}_ca_{}".format(datetime.datetime.now(), COMM_ACTION))
+    }, "models/{}_ca_{}.pt".format(datetime.datetime.now(), COMM_ACTION))
 
     """ RENDER THE POLICY """
-    env = pistonball_v6.parallel_env(render_mode="human", continuous=False)
+    env = pistonball_v6.parallel_env(render_mode="rgb_array", continuous=False)
+    # env = pistonball_v6.parallel_env(render_mode="human", continuous=False)
     env = color_reduction_v0(env)
     env = resize_v1(env, 64, 64)
     env = frame_stack_v1(env, stack_size=4)
@@ -360,26 +258,31 @@ if __name__ == "__main__":
 
     if render:
         with torch.no_grad():
-            # render 5 episodes out
-            for episode in range(5):
-                obs, infos = env.reset(seed=None)
-                obs = batchify_obs(obs, device)
-                terms = [False]
-                truncs = [False]
-                while not any(terms) and not any(truncs):
-                    ids = torch.arange(NUM_PISTONS).unsqueeze(-1).to(device)
-                    comm = agent.get_comm(obs, ids)
-                    if comm is not None and COMM_ACTION:
-                        # Each Agent gets a copy of the communications
-                        comm_batch = torch.tile(
-                            comm.view((1, COMM_SIZE)), (B, 1)).to(device)
-                    else:
-                        comm_batch = torch.zeros((B, NUM_PISTONS)).to(device)
+            for ep in range(5):
+                print(f"Rendering episode {ep}")
+                gif_path = f"{writer.log_dir}/rendered_episode/episode_{ep}.gif"
+                render_and_save_gif(env, agent, gif_path=gif_path, num_pistons=NUM_PISTONS, comm_action=COMM_ACTION, comm_size_compressed=COMM_SIZE_COMPRESSED)
+            # frames = []
+            # # render 5 episodes out
+            # for episode in range(5):
+            #     obs, infos = env.reset(seed=None)
+            #     obs = batchify_obs(obs, device)
+            #     terms = [False]
+            #     truncs = [False]
+            #     while not any(terms) and not any(truncs):
+            #         ids = torch.arange(NUM_PISTONS).unsqueeze(-1).to(device)
+            #         comm = agent.get_comm(obs, ids)
+            #         if comm is not None and COMM_ACTION:
+            #             # Each Agent gets a copy of the communications
+            #             comm_batch = torch.tile(
+            #                 comm.view((1, COMM_SIZE)), (B, 1)).to(device)
+            #         else:
+            #             comm_batch = torch.zeros((B, NUM_PISTONS)).to(device)
 
-                    actions, logprobs, _, values = agent.get_action_and_value(
-                        obs, ids, comm=comm_batch)
-                    obs, rewards, terms, truncs, infos = env.step(
-                        unbatchify(actions, env))
-                    obs = batchify_obs(obs, device)
-                    terms = [terms[a] for a in terms]
-                    truncs = [truncs[a] for a in truncs]
+            #         actions, logprobs, _, values = agent.get_action_and_value(
+            #             obs, ids, comm=comm_batch)
+            #         obs, rewards, terms, truncs, infos = env.step(
+            #             unbatchify(actions, env))
+            #         obs = batchify_obs(obs, device)
+            #         terms = [terms[a] for a in terms]
+            #         truncs = [truncs[a] for a in truncs]
