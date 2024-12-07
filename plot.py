@@ -7,8 +7,8 @@ event_logs = [
     # ('runs/Nov30_21-58-11_cassie-cs', 'Comm-ActionState'),
     # ('runs/Nov29_19-39-28_cassie-baseline', 'Baseline'),
     # ('runs/Dec01_08-50-45_cassie', 'Comm-Action'),
-    ('runs/Dec07_15-45-29_cassie', 'Comm-Attn'),
-    ('runs/Dec07_15-59-06_cassie', 'Baseline'),
+    ('runs/Dec07_15-45-29_cassie_attn', 'Comm-Attn'),
+    ('runs/Dec07_15-59-06_cassie_baseline', 'Baseline'),
 ]
 
 # Load the event logs

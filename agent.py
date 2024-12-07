@@ -93,7 +93,7 @@ class MultiAgentAttention(nn.Module):
         
         assert hidden_dim * n_heads == output_dim, "Output dim must be equal to hidden_dim * n_heads"
 
-    def forward(self, agent_features):
+    def forward(self, agent_features, return_attention=False):
         """
         agent_features: Tensor of shape [batch_size (n_agents), input_dim]
         """
@@ -112,4 +112,6 @@ class MultiAgentAttention(nn.Module):
         attended_features = torch.einsum("bhc,chd->bhd", attention_weights, value)
         attended_features = attended_features.reshape(batch_size, -1)
 
+        if return_attention:
+            return attended_features, attention_weights
         return attended_features

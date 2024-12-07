@@ -53,7 +53,7 @@ def render_and_save_gif(env, agent,
             if comm is not None and comm_action:
                 comm_batch = comm.to(device)
             else:
-                comm_batch = torch.zeros((obs.shape[0], num_pistons)).to(device)
+                comm_batch = torch.zeros((obs.shape[0], comm_size_compressed)).to(device)
 
             actions, logprobs, _, values = agent.get_action_and_value(obs, ids, comm=comm_batch)
             obs, rewards, terms, truncs, infos = env.step(unbatchify(actions, env))
