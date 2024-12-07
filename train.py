@@ -40,11 +40,17 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('-ca', '--communicate_actions', action='store_true')
     parser.add_argument('-r', '--render', action='store_true')
+    parser.add_argument('--neighbor_range', type=int, default=None) 
     args = parser.parse_args()
     COMM_ACTION = args.communicate_actions
     render = args.render
 
-    writer = SummaryWriter()
+    comment = ""
+    if args.communicate_actions:
+        comment = "_ca"
+        if args.neighbor_range:
+            comment += f"_nr_{args.neighbor_range}"
+    writer = SummaryWriter(comment=comment)
 
     """ ENV SETUP """
     env = pistonball_v6.parallel_env(
@@ -64,7 +70,8 @@ if __name__ == "__main__":
 
     """ LEARNER SETUP """
     agent = Agent(num_actions=num_actions,
-                  comm_size=COMM_SIZE, num_pistons=NUM_PISTONS, device=device, comm_size_compressed=COMM_SIZE_COMPRESSED).to(device)
+                  comm_size=COMM_SIZE, num_pistons=NUM_PISTONS, device=device, comm_size_compressed=COMM_SIZE_COMPRESSED,
+                  neighbor_range=args.neighbor_range).to(device)
     optimizer = optim.Adam(agent.parameters(), lr=LR, eps=1e-5)
 
     """ ALGO LOGIC: EPISODE STORAGE"""
