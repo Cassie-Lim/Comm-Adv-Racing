@@ -1,21 +1,29 @@
 # Comm-Adv-Racing
 
-<div style="display: flex; justify-content: space-around;">
+<!-- <div style="display: flex; justify-content: space-around;">
   <div style="text-align: center;">
-    <img src="assets/baseline.gif" alt="Baseline" style="width: `100`%;">
+    <img src="assets/baseline.gif" alt="Baseline" style="width: 300;">
     <p>wo communication</p>
   </div>
   <div style="text-align: center;">
-    <img src="assets/neighborhood_all.gif" alt="Neighborhood-all" style="width: 100%;">
+    <img src="assets/neighborhood_all.gif" alt="Neighborhood-all" style="width: 300;">
     <p>w communication</p>
   </div>
-</div>
+</div> -->
+<p style="text-align: center;">
+    <img src="assets/baseline.gif" width="350"/>
+    <img src="assets/neighborhood_all.gif" width="350"/>
+</p>
+<p style="text-align: center;">
+    <strong>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Without Communication &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; With Communication</strong>
+</p>
 
 
 This repository contains the implementation of a reinforcement learning algorithm for the Pistonball environment using Proximal Policy Optimization (PPO) with communication between agents. The goal is to investigate how communication between agents influences their performance in individual tasks. Experiments have shown communication has made the context richer and enabled more beneficial interactions in semi-adversarial and cooperative situations.
 
-![Loss curve](assets/plot.png)
-
+<p style="text-align: center;">
+    <img src="assets/plot.png" width="600"/>
+</p>
 ## Setup
 
 1. Clone the repository:
