@@ -1,14 +1,18 @@
 import matplotlib.pyplot as plt
+from matplotlib.animation import FuncAnimation
 from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
 import numpy as np
+import argparse
 
 # List of event log paths and corresponding experiment names
 event_logs = [
-    # ('runs/Nov30_21-58-11_cassie-cs', 'Comm-ActionState'),
-    # ('runs/Nov29_19-39-28_cassie-baseline', 'Baseline'),
-    # ('runs/Dec01_08-50-45_cassie', 'Comm-Action'),
-    ('runs/Dec07_15-45-29_cassie_attn', 'Comm-Attn'),
-    ('runs/Dec07_15-59-06_cassie_baseline', 'Baseline'),
+    # ('runs/Dec07_15-45-29_cassie_attn', 'Comm-Attn'),
+    # ('runs/Dec07_15-59-06_cassie_baseline', 'Baseline'),
+    ('runs/Dec07_15-45-29_cassie_attn', 'Neighborhood-all'),
+    ('runs/Dec07_18-58-53_cassie_ca_nr_1', 'Neighborhood-1'),
+    ('runs/Dec07_18-59-22_cassie_ca_nr_3', 'Neighborhood-3'),
+    ('runs/Dec07_17-56-20_cassie_ca_nr_5', 'Neighborhood-5'),
+    # ('runs/Dec07_17-56-57_cassie_ca_nr_10', 'Neighborhood-10'),
 ]
 
 # Load the event logs
@@ -36,36 +40,44 @@ def moving_avg_std(values, window_size=10):
         stds.append(np.std(window))
     return np.array(means), np.array(stds)
 
-# Extract and process data for each event log
-data = {}
-for event_acc, name in event_accumulators:
-    return_data = extract_scalar_data(event_acc, 'Episode/Return')
-    value_loss_data = extract_scalar_data(event_acc, 'Episode/Value_Loss')
-    policy_loss_data = extract_scalar_data(event_acc, 'Episode/Policy_Loss')
-    
-    steps_return, values_return = extract_steps_and_values(return_data)
-    steps_value_loss, values_value_loss = extract_steps_and_values(value_loss_data)
-    steps_policy_loss, values_policy_loss = extract_steps_and_values(policy_loss_data)
-    
-    mean_return, std_return = moving_avg_std(values_return)
-    mean_value_loss, std_value_loss = moving_avg_std(values_value_loss)
-    mean_policy_loss, std_policy_loss = moving_avg_std(values_policy_loss)
-    
-    steps_return_smooth = steps_return[len(steps_return) - len(mean_return):]
-    steps_value_loss_smooth = steps_value_loss[len(steps_value_loss) - len(mean_value_loss):]
-    steps_policy_loss_smooth = steps_policy_loss[len(steps_policy_loss) - len(mean_policy_loss):]
-    
-    data[name] = {
-        'steps_return': steps_return_smooth,
-        'mean_return': mean_return,
-        'std_return': std_return,
-        'steps_value_loss': steps_value_loss_smooth,
-        'mean_value_loss': mean_value_loss,
-        'std_value_loss': std_value_loss,
-        'steps_policy_loss': steps_policy_loss_smooth,
-        'mean_policy_loss': mean_policy_loss,
-        'std_policy_loss': std_policy_loss,
-    }
+# Function to update the plot
+def update_plot(frame):
+    data = {}
+    for event_acc, name in event_accumulators:
+        event_acc.Reload()
+        return_data = extract_scalar_data(event_acc, 'Episode/Return')
+        value_loss_data = extract_scalar_data(event_acc, 'Episode/Value_Loss')
+        policy_loss_data = extract_scalar_data(event_acc, 'Episode/Policy_Loss')
+        
+        steps_return, values_return = extract_steps_and_values(return_data)
+        steps_value_loss, values_value_loss = extract_steps_and_values(value_loss_data)
+        steps_policy_loss, values_policy_loss = extract_steps_and_values(policy_loss_data)
+        
+        mean_return, std_return = moving_avg_std(values_return)
+        mean_value_loss, std_value_loss = moving_avg_std(values_value_loss)
+        mean_policy_loss, std_policy_loss = moving_avg_std(values_policy_loss)
+        
+        steps_return_smooth = steps_return[len(steps_return) - len(mean_return):]
+        steps_value_loss_smooth = steps_value_loss[len(steps_value_loss) - len(mean_value_loss):]
+        steps_policy_loss_smooth = steps_policy_loss[len(steps_policy_loss) - len(mean_policy_loss):]
+        
+        data[name] = {
+            'steps_return': steps_return_smooth,
+            'mean_return': mean_return,
+            'std_return': std_return,
+            'steps_value_loss': steps_value_loss_smooth,
+            'mean_value_loss': mean_value_loss,
+            'std_value_loss': std_value_loss,
+            'steps_policy_loss': steps_policy_loss_smooth,
+            'mean_policy_loss': mean_policy_loss,
+            'std_policy_loss': std_policy_loss,
+        }
+
+    plt.clf()
+    plot_data(1, data, 'return', 'Return', 'Episode Return')
+    plot_data(2, data, 'value_loss', 'Value Loss', 'Value Loss')
+    plot_data(3, data, 'policy_loss', 'Policy Loss', 'Policy Loss')
+    plt.tight_layout()
 
 # Function to plot data
 def plot_data(subplot_index, data, key, ylabel, title):
@@ -81,14 +93,17 @@ def plot_data(subplot_index, data, key, ylabel, title):
     plt.legend()
     plt.title(title)
 
-# Plot the data
-plt.figure(figsize=(9, 12))
+def main(update):
+    fig = plt.figure(figsize=(9, 12))
+    if update:
+        ani = FuncAnimation(fig, update_plot, interval=10000)  # Update every 1 seconds
+        plt.show()
+    else:
+        update_plot(None)
+        plt.savefig("plot_ablation.png")
 
-plot_data(1, data, 'return', 'Return', 'Episode Return')
-plot_data(2, data, 'value_loss', 'Value Loss', 'Value Loss')
-plot_data(3, data, 'policy_loss', 'Policy Loss', 'Policy Loss')
-
-
-plt.tight_layout()
-# plt.show()
-plt.savefig("plot.png")
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Plot training metrics.")
+    parser.add_argument('--update', default=False, action='store_true', help="Update the plot in real-time.")
+    args = parser.parse_args()
+    main(args.update)

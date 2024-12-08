@@ -16,12 +16,14 @@ n_heads = 4
 frame_size = (64, 64)
 max_cycles = 125
 stack_size = 4
+neighbor_range = 5
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # Load trained model (or create a new one)
-state_dict_path = "/home/cassie/Workspace/DRL/Comm-Adv-Racing/models/2024-12-07 16:19:02.883092_ca_True.pt"
+state_dict_path = "models/2024-12-07 18:32:53.300799_ca_True_nr_5.pt"
 state_dict = torch.load(state_dict_path, weights_only=True)
-agent = Agent(num_actions=3, comm_size=comm_size, num_pistons=num_pistons, device=device, comm_size_compressed=output_dim).to(device)
+agent = Agent(num_actions=3, comm_size=comm_size, num_pistons=num_pistons, device=device, comm_size_compressed=output_dim,
+              neighbor_range=neighbor_range).to(device)
 agent.load_state_dict(state_dict['agent_state_dict'])
 
 env = pistonball_v6.parallel_env(
@@ -51,6 +53,7 @@ with torch.no_grad():
     _, attention_weights = agent.comm_aggregator(agent_features, return_attention=True)
 
 # Visualize attention for each head
+comment = f"_nr_{neighbor_range}" if neighbor_range is not None else ""
 for head in range(n_heads):
     plt.figure(figsize=(8, 6))
     sns.heatmap(attention_weights[:, head, :].detach().cpu().numpy(), cmap="Blues", cbar=True)
@@ -58,7 +61,7 @@ for head in range(n_heads):
     plt.xlabel("Attended Agent")
     plt.ylabel("Querying Agent")
     # plt.show()
-    plt.savefig(f"attn_viz/attention_head_{head + 1}.png")
+    plt.savefig(f"attn_viz/attention_head_{head + 1}{comment}.png")
 
 # plot average attention weights
 plt.figure(figsize=(8, 6))
@@ -67,4 +70,4 @@ plt.title("Average Attention Weights")
 plt.xlabel("Attended Agent")
 plt.ylabel("Querying Agent")
 # plt.show()
-plt.savefig("attn_viz/attention_average.png")
+plt.savefig(f"attn_viz/attention_average{comment}.png")

@@ -252,7 +252,8 @@ if __name__ == "__main__":
         'epoch': total_episodes,
         'agent_state_dict': agent.state_dict(),
         'optimizer_state_dict': optimizer.state_dict(),
-    }, "models/{}_ca_{}.pt".format(datetime.datetime.now(), COMM_ACTION))
+    }, "models/{}_ca_{}{}.pt".format(datetime.datetime.now(), COMM_ACTION,
+                                    f"_nr_{args.neighbor_range}" if args.neighbor_range else ""))
 
     """ RENDER THE POLICY """
     env = pistonball_v6.parallel_env(render_mode="rgb_array", continuous=False)
